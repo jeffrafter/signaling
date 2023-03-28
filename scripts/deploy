@@ -1,0 +1,10 @@
+#!/bin/sh
+
+set -x
+
+set -o allexport # Automatically export all the vars in .env
+source .env
+
+echo "Deploying signaling.zip"
+cd $DEPLOY_PATH
+terraform apply --auto-approve

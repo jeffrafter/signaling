@@ -1,0 +1,19 @@
+version: '3.2'
+services:
+  localstack:
+    image: localstack/localstack:latest
+    network_mode: bridge
+    container_name: localstack_main
+    ports:
+      - '4566:4566'
+      - '4563-4599:4563-4599'
+    environment:
+      - SERVICES=dynamodb
+      - DATA_DIR=/tmp/localstack/data
+      - TMPDIR=.localstack
+      - HOST_TMP_FOLDER=${TMPDIR}
+      - START_WEB=false
+      - DEBUG=1
+    volumes:
+      - './.localstack:/tmp/localstack'
+      - '/var/run/docker.sock:/var/run/docker.sock'

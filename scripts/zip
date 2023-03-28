@@ -1,0 +1,11 @@
+#!/bin/sh
+
+set -x
+
+set -o allexport # Automatically export all the vars in .env
+source .env
+
+cd dist
+echo "Zipping signaling.js"
+echo "Deploy path: $DEPLOY_PATH"
+zip -r ../$DEPLOY_PATH/signaling.zip signaling.js

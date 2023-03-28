@@ -1,0 +1,33 @@
+#!/bin/sh
+
+set -x
+
+set -o allexport # Automatically export all the vars in .env
+source .env
+
+aws dynamodb create-table \
+    --table-name Database \
+    --endpoint-url $AWS_DYNAMODB_ENDPOINT \
+    --attribute-definitions \
+        AttributeName=pk,AttributeType=S \
+        AttributeName=sk,AttributeType=S \
+        AttributeName=data,AttributeType=S \
+    --key-schema AttributeName=pk,KeyType=HASH AttributeName=sk,KeyType=RANGE  \
+    --provisioned-throughput ReadCapacityUnits=10,WriteCapacityUnits=10 \
+    --global-secondary-indexes \
+        "[
+            {
+                \"IndexName\": \"gs1\",
+                \"KeySchema\": [
+                    {\"AttributeName\":\"sk\",\"KeyType\":\"HASH\"},
+                    {\"AttributeName\":\"data\",\"KeyType\":\"RANGE\"}
+                ],
+                \"Projection\": {
+                    \"ProjectionType\":\"ALL\"
+                },
+                \"ProvisionedThroughput\": {
+                    \"ReadCapacityUnits\": 5,
+                    \"WriteCapacityUnits\": 5
+                }
+            }
+        ]"
