@@ -1,3 +1,4 @@
+/* eslint-disable no-case-declarations */
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda'
 
 import { DocumentClient, ClientConfiguration } from 'aws-sdk/clients/dynamodb'
@@ -22,20 +23,6 @@ if (process.env.JEST_WORKER_ID) {
 
 const Database = new DocumentClient(DynamoDBOptions)
 
-// Message structure and protocol flow taken from y-webrtc/bin/server.js
-interface YWebRtcSubscriptionMessage {
-  type: 'subscribe' | 'unsubscribe'
-  topics?: string[]
-}
-interface YWebRtcPingMessage {
-  type: 'ping'
-}
-interface YWebRtcPublishMessage {
-  type: 'publish'
-  topic?: string
-  [k: string]: unknown
-}
-
 class InvalidTopicError extends Error {}
 
 const assertTopic = (topic: string) => {
@@ -55,9 +42,10 @@ async function subscribe(topic: string, connectionId: string) {
     Item: {
       pk: `TOPIC-${topic}`,
       sk: `CONNECTION-${connectionId}`,
+      data: `0`,
     },
   }
-  return Database.put(params)
+  await Database.put(params)
     .promise()
     .catch((err) => {
       console.log(`Cannot subscribe to topic ${topic}: ${err.message}`)
@@ -74,11 +62,21 @@ async function unsubscribe(topic: string, connectionId: string) {
       sk: `CONNECTION-${connectionId}`,
     },
   }
-  return Database.delete(params)
+  await Database.delete(params)
     .promise()
     .catch((err) => {
       console.log(`Cannot unsubscribe from topic ${topic}: ${err.message}`)
     })
+}
+
+async function unsubscribeAll(connectionId: string) {
+  // Remove the connection from all topics
+  const topics = await getTopics(connectionId)
+  const promises: Promise<unknown>[] = []
+  for (const topic of topics) {
+    promises.push(unsubscribe(topic, connectionId))
+  }
+  await Promise.all(promises)
 }
 
 async function getSubscribers(topic: string) {
@@ -127,56 +125,81 @@ async function getTopics(connectionId: string) {
   }
 }
 
-async function handleYWebRtcMessage(
+export async function handleConnect(connectionId: string): Promise<void> {
+  console.log(`Connected: ${connectionId}`)
+}
+
+// When a client disconnects, we need to clean up the connection and notify all of the other clients.
+// This is not guaranteed to be called, so we also need to handle stale connections when sending messages.
+export async function handleDisconnect(connectionId: string): Promise<void> {
+  console.log(`Disconnected: ${connectionId}`)
+  await unsubscribeAll(connectionId)
+}
+
+// We need to set up a handler for messages, generally we use this to forward messages to other peers
+// and handle the signaling handshake. The message is expected to be a JSON object with a type field
+// that indicates what kind of message it is.
+//
+// Valid types:
+//
+// - offer:     When the peers that are in the room receive the new client's "ready" message, they will
+//              each send an offer message to the new client (message[sid]). This is the first step in
+//              the WebRTC signaling handshake. This message will be forwarded to the new client.
+// - answer:    When the client receives an offer message, it will create a client side Peer object and
+//              send an answer message back to the client that sent the offer. This answer message
+//              will be forwarded to the peer that sent the offer (message[sid]).
+// - candidate: Once the offer and answer are exchanged, the peers will exchange ICE candidates, these
+//              are broadcast to all peers in the room.
+export async function handleMessage(
   connectionId: string,
-  message: YWebRtcSubscriptionMessage | YWebRtcPublishMessage | YWebRtcPingMessage,
-  send: (receiver: string, message: unknown) => Promise<void>,
-) {
-  const promises: Promise<unknown>[] = []
+  // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types, @typescript-eslint/no-explicit-any
+  message: any,
+  send: (receiverConnectionId: string, message: string) => Promise<void>,
+): Promise<void> {
+  // const promises: Promise<unknown>[] = []
 
   if (message && message.type) {
     switch (message.type) {
       case 'subscribe':
-        ;(message.topics || []).forEach((topic) => {
-          promises.push(subscribe(topic, connectionId))
-        })
-        break
-      case 'unsubscribe':
-        ;(message.topics || []).forEach((topic) => {
-          promises.push(unsubscribe(topic, connectionId))
-        })
-        break
-      case 'publish':
-        if (message.topic) {
-          const receivers = await getSubscribers(message.topic)
-          receivers.forEach((receiver) => {
-            promises.push(send(receiver, message))
-          })
+        const room = message.room
+        await subscribe(room, connectionId)
+
+        // Now that this client is connected, tell all of the other clients that this client is ready
+        // and send them this client's connectionId so they can setup the signaling handshake.
+        const readyMessage = JSON.stringify({ type: 'ready', sid: connectionId })
+        const receivers = await getSubscribers(room)
+        for (let i = 0; i < receivers.length; i++) {
+          if (receivers[i] === connectionId) continue
+          await send(receivers[i], readyMessage)
         }
         break
-      case 'ping':
-        promises.push(send(connectionId, { type: 'pong' }))
+      case 'unsubscribe':
+        await unsubscribeAll(connectionId)
+        break
+      case 'offer':
+      case 'answer':
+      case 'candidate':
+        let peerToForwardTo = undefined
+        if (message['sid']) {
+          peerToForwardTo = message['sid']
+        }
+        message['sid'] = connectionId
+        if (peerToForwardTo) {
+          await send(peerToForwardTo, JSON.stringify(message))
+        } else {
+          // Broadcast it to all peers in the room, except self
+          const topics = await getTopics(connectionId)
+          for (const topic of topics) {
+            const receivers = await getSubscribers(topic)
+            for (let i = 0; i < receivers.length; i++) {
+              if (receivers[i] === connectionId) continue
+              await send(receivers[i], JSON.stringify(message))
+            }
+          }
+        }
         break
     }
   }
-
-  await Promise.all(promises)
-}
-
-function handleConnect(connectionId: string) {
-  // Nothing to do
-  console.log(`Connected: ${connectionId}`)
-}
-
-async function handleDisconnect(connectionId: string) {
-  console.log(`Disconnected: ${connectionId}`)
-  // Remove the connection from all topics
-  const topics = await getTopics(connectionId)
-  const promises: Promise<unknown>[] = []
-  for (const topic of topics) {
-    promises.push(unsubscribe(topic, connectionId))
-  }
-  await Promise.all(promises)
 }
 
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
@@ -222,14 +245,14 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
   try {
     switch (event.requestContext.routeKey) {
       case '$connect':
-        handleConnect(event.requestContext.connectionId)
+        await handleConnect(event.requestContext.connectionId)
         break
       case '$disconnect':
         await handleDisconnect(event.requestContext.connectionId)
         break
       case '$default':
       default:
-        await handleYWebRtcMessage(event.requestContext.connectionId, JSON.parse(event.body || '{}'), send)
+        await handleMessage(event.requestContext.connectionId, JSON.parse(event.body || '{}'), send)
         break
     }
 
