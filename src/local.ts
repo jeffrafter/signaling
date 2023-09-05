@@ -20,15 +20,19 @@ wss.on('connection', async (ws: ws, req: IncomingMessage) => {
       for (const client of wss.clients) {
         if ((client as WebSocketWithConnectionId).connectionId === receiverConnectionId) {
           if (client.readyState === WebSocket.CLOSING || client.readyState === WebSocket.CLOSED) {
+            // If the client is closing or closed, we need to clean up the connection
             await handleDisconnect(receiverConnectionId)
-            break
+            return
           }
           if (client.readyState === WebSocket.OPEN) {
+            console.log(`REALLY sending message to ${receiverConnectionId}`, { message })
             await client.send(message)
-            break
+            return
           }
         }
       }
+      // If we got through the loop and didn't find the client, we need to clean up the connection
+      await handleDisconnect(receiverConnectionId)
     } catch (error: unknown) {
       // Log, but otherwise ignore: There's not much we can do, really.
       // In the future, we could add a retry mechanism here or disconnect the client.
@@ -53,7 +57,7 @@ wss.on('connection', async (ws: ws, req: IncomingMessage) => {
 
   // TODO: should errors lead to disconnects?
   ws.on('error', async (error) => {
-    console.error(`Error ${connectionId}`, error)
+    console.error(`Error ${connectionId}, forcing disconnect`, error)
     await handleDisconnect(connectionId)
   })
 
