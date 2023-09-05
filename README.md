@@ -113,3 +113,27 @@ AWS_PROFILE=your-aws-profile
 TABLE_NAME=Database
 DEPLOY_PATH=../../path-to-your-ops-folder/ops
 ```
+
+# Running this locally in development
+
+Running this locally requires mimicking the AWS environment. I use `localstack` for this.
+
+Run Docker Desktop. Then run:
+
+```
+npm run localstack
+```
+
+This will start the AWS clone locally but you will need to initialize the local DynamoDB:
+
+```
+./scripts/create-local-db
+```
+
+Once running, you should be able to run the server:
+
+```
+npm run start
+```
+
+Note this is running the `local.ts` version of the web socket on port 4001. This isn't the same as the production version which is relying on AWS API Gateway and Lambda, but the main handler logic is the same for both.
