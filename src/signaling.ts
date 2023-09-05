@@ -170,40 +170,36 @@ export async function handleMessage(
         // and send them this client's connectionId so they can setup the signaling handshake.
         const readyMessage = JSON.stringify({ type: 'ready', sid: connectionId })
         const receivers = await getSubscribers(room)
-        const promises: Promise<unknown>[] = []
+        const subscribePromises: Promise<unknown>[] = []
         for (let i = 0; i < receivers.length; i++) {
           if (receivers[i] === connectionId) continue
-          promises.push(send(receivers[i], readyMessage))
+          subscribePromises.push(send(receivers[i], readyMessage))
         }
-        await Promise.all(promises)
+        await Promise.all(subscribePromises)
         break
       case 'unsubscribe':
         await unsubscribeAll(connectionId)
         break
       case 'offer':
       case 'answer':
+        const peerToForwardTo = message.sid
+        message.sid = connectionId
+        await send(peerToForwardTo, JSON.stringify(message))
+        break
       case 'candidate':
-        let peerToForwardTo = undefined
-        if (message['sid']) {
-          peerToForwardTo = message['sid']
-        }
-        message['sid'] = connectionId
-        if (peerToForwardTo) {
-          await send(peerToForwardTo, JSON.stringify(message))
-        } else {
-          // Broadcast it to all peers in the room, except self
-          const broadcastMessage = JSON.stringify(message)
-          const topics = await getTopics(connectionId)
-          const promises: Promise<unknown>[] = []
-          for (const topic of topics) {
-            const receivers = await getSubscribers(topic)
-            for (let i = 0; i < receivers.length; i++) {
-              if (receivers[i] === connectionId) continue
-              promises.push(send(receivers[i], broadcastMessage))
-            }
+        message.sid = connectionId
+        const broadcastMessage = JSON.stringify(message)
+        // Broadcast it to all peers in the room, except self
+        const topics = await getTopics(connectionId)
+        const candidatePromises: Promise<unknown>[] = []
+        for (const topic of topics) {
+          const receivers = await getSubscribers(topic)
+          for (let i = 0; i < receivers.length; i++) {
+            if (receivers[i] === connectionId) continue
+            candidatePromises.push(send(receivers[i], broadcastMessage))
           }
-          await Promise.all(promises)
         }
+        await Promise.all(candidatePromises)
         break
     }
   }
