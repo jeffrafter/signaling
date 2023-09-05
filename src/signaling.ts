@@ -141,14 +141,19 @@ export async function handleDisconnect(connectionId: string): Promise<void> {
 //
 // Valid types:
 //
-// - offer:     When the peers that are in the room receive the new client's "ready" message, they will
-//              each send an offer message to the new client (message[sid]). This is the first step in
-//              the WebRTC signaling handshake. This message will be forwarded to the new client.
-// - answer:    When the client receives an offer message, it will create a client side Peer object and
-//              send an answer message back to the client that sent the offer. This answer message
-//              will be forwarded to the peer that sent the offer (message[sid]).
-// - candidate: Once the offer and answer are exchanged, the peers will exchange ICE candidates, these
-//              are broadcast to all peers in the room.
+// - subscribe:   When a client connects, it will send a subscribe message to the server. This will
+//                add the client to the specified room (message[room]) and send a "ready" message to
+//                all of the other clients in the room.
+// - unsubscribe: When a client disconnects, it will send an unsubscribe message to the server. This
+//                will remove the client from all rooms that it is in (not currently used).
+// - offer:       When the peers that are in the room receive the new client's "ready" message, they will
+//                each send an offer message to the new client (message[sid]). This is the first step in
+//                the WebRTC signaling handshake. This message will be forwarded to the new client.
+// - answer:      When the client receives an offer message, it will create a client side Peer object and
+//                send an answer message back to the client that sent the offer. This answer message
+//                will be forwarded to the peer that sent the offer (message[sid]).
+// - candidate:   Once the offer and answer are exchanged, the peers will exchange ICE candidates, these
+//                are broadcast to all peers in the room.
 export async function handleMessage(
   connectionId: string,
   // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types, @typescript-eslint/no-explicit-any

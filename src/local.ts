@@ -25,7 +25,6 @@ wss.on('connection', async (ws: ws, req: IncomingMessage) => {
             return
           }
           if (client.readyState === WebSocket.OPEN) {
-            console.log(`REALLY sending message to ${receiverConnectionId}`, { message })
             await client.send(message)
             return
           }
