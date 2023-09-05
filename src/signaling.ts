@@ -70,7 +70,6 @@ async function unsubscribe(topic: string, connectionId: string) {
 }
 
 async function unsubscribeAll(connectionId: string) {
-  // Remove the connection from all topics
   const topics = await getTopics(connectionId)
   const promises: Promise<unknown>[] = []
   for (const topic of topics) {
@@ -156,8 +155,6 @@ export async function handleMessage(
   message: any,
   send: (receiverConnectionId: string, message: string) => Promise<void>,
 ): Promise<void> {
-  // const promises: Promise<unknown>[] = []
-
   if (message && message.type) {
     switch (message.type) {
       case 'subscribe':
@@ -168,10 +165,12 @@ export async function handleMessage(
         // and send them this client's connectionId so they can setup the signaling handshake.
         const readyMessage = JSON.stringify({ type: 'ready', sid: connectionId })
         const receivers = await getSubscribers(room)
+        const promises: Promise<unknown>[] = []
         for (let i = 0; i < receivers.length; i++) {
           if (receivers[i] === connectionId) continue
-          await send(receivers[i], readyMessage)
+          promises.push(send(receivers[i], readyMessage))
         }
+        await Promise.all(promises)
         break
       case 'unsubscribe':
         await unsubscribeAll(connectionId)
@@ -188,14 +187,17 @@ export async function handleMessage(
           await send(peerToForwardTo, JSON.stringify(message))
         } else {
           // Broadcast it to all peers in the room, except self
+          const broadcastMessage = JSON.stringify(message)
           const topics = await getTopics(connectionId)
+          const promises: Promise<unknown>[] = []
           for (const topic of topics) {
             const receivers = await getSubscribers(topic)
             for (let i = 0; i < receivers.length; i++) {
               if (receivers[i] === connectionId) continue
-              await send(receivers[i], JSON.stringify(message))
+              promises.push(send(receivers[i], broadcastMessage))
             }
           }
+          await Promise.all(promises)
         }
         break
     }
@@ -212,12 +214,12 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     endpoint,
   })
 
-  const send = async (connectionId: string, message: unknown) => {
+  const send = async (connectionId: string, message: string) => {
     try {
       await apigwManagementApi
         .postToConnection({
           ConnectionId: connectionId,
-          Data: JSON.stringify(message),
+          Data: message,
         })
         .promise()
     } catch (error: unknown) {
