@@ -1,0 +1,18 @@
+#!/bin/sh
+
+set -x
+
+set -o allexport # Automatically export all the vars in .env
+source .env
+
+# aws dynamodb execute-statement --statement "SELECT * FROM Database" --endpoint-url $AWS_DYNAMODB_ENDPOINT
+
+aws dynamodb describe-table --table-name Database --endpoint-url $AWS_DYNAMODB_ENDPOINT
+
+aws dynamodb query \
+  --table-name Database \
+  --index-name gs1 \
+  --key-condition-expression "sk = :this" \
+  --expression-attribute-values "{ \":this\": { \"S\": \"CONNECTION-jg0d62S8WpGhTZLIG1U9Xw\" } }" \
+  --endpoint-url $AWS_DYNAMODB_ENDPOINT
+

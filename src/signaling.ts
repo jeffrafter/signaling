@@ -201,6 +201,9 @@ export async function handleMessage(
         }
         await Promise.all(candidatePromises)
         break
+      case 'ping':
+        await send(connectionId, JSON.stringify({ type: 'pong' }))
+        break
     }
   }
 }
