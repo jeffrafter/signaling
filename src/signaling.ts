@@ -34,7 +34,7 @@ const assertTopic = (topic: string) => {
   }
 }
 
-async function subscribe(topic: string, connectionId: string) {
+async function subscribe(topic: string, connectionId: string, id: string) {
   assertTopic(topic)
 
   const params = {
@@ -42,7 +42,7 @@ async function subscribe(topic: string, connectionId: string) {
     Item: {
       pk: `TOPIC-${topic}`,
       sk: `CONNECTION-${connectionId}`,
-      data: `0`,
+      data: id || '0',
     },
   }
   await Database.put(params)
@@ -92,10 +92,13 @@ async function getSubscribers(topic: string) {
     }
     const subscribers = await Database.query(params).promise()
     if (!subscribers.Items || subscribers.Items.length === 0) return []
-    const connectionIds = subscribers.Items.map((item) => {
-      return item.sk.replace('CONNECTION-', '')
+    const items = subscribers.Items.map((item) => {
+      return {
+        connectionId: item.sk.replace('CONNECTION-', ''),
+        id: item.data,
+      }
     })
-    return connectionIds
+    return items
   } catch (error: unknown) {
     console.log(`Cannot get subscribers for topic ${topic}: ${(error as Error).message}`)
     return []
@@ -163,17 +166,27 @@ export async function handleMessage(
   if (message && message.type) {
     switch (message.type) {
       case 'subscribe':
+        const id = message.id
         const room = message.room
-        await subscribe(room, connectionId)
+        await subscribe(room, connectionId, id)
 
         // Now that this client is connected, tell all of the other clients that this client is ready
         // and send them this client's connectionId so they can setup the signaling handshake.
-        const readyMessage = JSON.stringify({ type: 'ready', sid: connectionId })
         const receivers = await getSubscribers(room)
         const subscribePromises: Promise<unknown>[] = []
         for (let i = 0; i < receivers.length; i++) {
-          if (receivers[i] === connectionId) continue
-          subscribePromises.push(send(receivers[i], readyMessage))
+          const receiver = receivers[i]
+          if (receiver.connectionId === connectionId) continue
+          subscribePromises.push(
+            send(
+              receiver.connectionId,
+              JSON.stringify({
+                type: 'ready',
+                sid: connectionId,
+                id: receiver.id,
+              }),
+            ),
+          )
         }
         await Promise.all(subscribePromises)
         break
@@ -188,15 +201,15 @@ export async function handleMessage(
         break
       case 'candidate':
         message.sid = connectionId
-        const broadcastMessage = JSON.stringify(message)
         // Broadcast it to all peers in the room, except self
         const topics = await getTopics(connectionId)
         const candidatePromises: Promise<unknown>[] = []
         for (const topic of topics) {
           const receivers = await getSubscribers(topic)
           for (let i = 0; i < receivers.length; i++) {
-            if (receivers[i] === connectionId) continue
-            candidatePromises.push(send(receivers[i], broadcastMessage))
+            const receiver = receivers[i]
+            if (receiver.connectionId === connectionId) continue
+            candidatePromises.push(send(receiver.connectionId, JSON.stringify({ ...message, id: receiver.id })))
           }
         }
         await Promise.all(candidatePromises)
