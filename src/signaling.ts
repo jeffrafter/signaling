@@ -34,7 +34,7 @@ const assertTopic = (topic: string) => {
   }
 }
 
-async function subscribe(topic: string, connectionId: string, id: string) {
+async function subscribe(topic: string, connectionId: string, peerId: string) {
   assertTopic(topic)
 
   const params = {
@@ -42,7 +42,7 @@ async function subscribe(topic: string, connectionId: string, id: string) {
     Item: {
       pk: `TOPIC-${topic}`,
       sk: `CONNECTION-${connectionId}`,
-      data: id || '0',
+      data: peerId || '0',
     },
   }
   await Database.put(params)
@@ -73,7 +73,7 @@ async function unsubscribeAll(connectionId: string) {
   const topics = await getTopics(connectionId)
   const promises: Promise<unknown>[] = []
   for (const topic of topics) {
-    promises.push(unsubscribe(topic, connectionId))
+    promises.push(unsubscribe(topic.topic, connectionId))
   }
   await Promise.all(promises)
 }
@@ -94,6 +94,7 @@ async function getSubscribers(topic: string) {
     if (!subscribers.Items || subscribers.Items.length === 0) return []
     const items = subscribers.Items.map((item) => {
       return {
+        topic: item.pk.replace('TOPIC-', ''),
         connectionId: item.sk.replace('CONNECTION-', ''),
         id: item.data,
       }
@@ -117,10 +118,14 @@ async function getTopics(connectionId: string) {
     }
     const topics = await Database.query(params).promise()
     if (!topics.Items || topics.Items.length === 0) return []
-    const topicIds = topics.Items.map((item) => {
-      return item.pk.replace('TOPIC-', '')
+    const items = topics.Items.map((item) => {
+      return {
+        topic: item.pk.replace('TOPIC-', ''),
+        connectionId: item.sk.replace('CONNECTION-', ''),
+        id: item.data,
+      }
     })
-    return topicIds
+    return items
   } catch (error: unknown) {
     console.log(`Cannot get topics for subscriber ${connectionId}: ${(error as Error).message}`)
     return []
@@ -183,7 +188,7 @@ export async function handleMessage(
               JSON.stringify({
                 type: 'ready',
                 sid: connectionId,
-                id: receiver.id,
+                id,
               }),
             ),
           )
@@ -205,11 +210,13 @@ export async function handleMessage(
         const topics = await getTopics(connectionId)
         const candidatePromises: Promise<unknown>[] = []
         for (const topic of topics) {
-          const receivers = await getSubscribers(topic)
+          const peerId = topic.id
+          const receivers = await getSubscribers(topic.topic)
           for (let i = 0; i < receivers.length; i++) {
             const receiver = receivers[i]
             if (receiver.connectionId === connectionId) continue
-            candidatePromises.push(send(receiver.connectionId, JSON.stringify({ ...message, id: receiver.id })))
+            // The id is the peer's id in this room, not the connectionId
+            candidatePromises.push(send(receiver.connectionId, JSON.stringify({ ...message, id: peerId })))
           }
         }
         await Promise.all(candidatePromises)
